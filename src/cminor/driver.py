@@ -15,6 +15,7 @@ from cminor.diagnostics import (
 from cminor.lexer import Lexer, TokenType
 from cminor.parser import Parser, ASTDumper
 from cminor.sema import SemanticAnalyzer
+from cminor.ir import IRGenerator
 
 
 CAPABILITIES_TEXT = f"""C Minor Compiler (cminorcc) Capabilities Report
@@ -213,8 +214,13 @@ class CompilerDriver:
         if args.check:
             return 0
 
+        ir_gen = IRGenerator()
+        ir_program = ir_gen.generate(ast)
+
         if args.dump_ir:
+            print(ir_program.format())
             return 0
+
         if args.emit_backend_ir:
             return 0
         return 0
