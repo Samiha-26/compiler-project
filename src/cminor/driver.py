@@ -14,6 +14,7 @@ from cminor.diagnostics import (
 )
 from cminor.lexer import Lexer, TokenType
 from cminor.parser import Parser, ASTDumper
+from cminor.sema import SemanticAnalyzer
 
 
 CAPABILITIES_TEXT = f"""C Minor Compiler (cminorcc) Capabilities Report
@@ -198,11 +199,21 @@ class CompilerDriver:
             dumper = ASTDumper()
             print(dumper.dump(ast))
             return 0
+
+        analyzer = SemanticAnalyzer(emitter=self.emitter)
+        analyzer.analyze(ast)
+
+        if self.emitter.has_errors():
+            return 1
+
         if args.dump_symbols:
+            print(analyzer.dump_symbols())
             return 0
-        if args.dump_ir:
-            return 0
+
         if args.check:
+            return 0
+
+        if args.dump_ir:
             return 0
         if args.emit_backend_ir:
             return 0
