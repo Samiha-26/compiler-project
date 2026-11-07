@@ -12,6 +12,7 @@ from cminor.diagnostics import (
     DiagnosticEmitter,
     CompilerException,
 )
+from cminor.lexer import Lexer, TokenType
 
 
 CAPABILITIES_TEXT = f"""C Minor Compiler (cminorcc) Capabilities Report
@@ -169,11 +170,23 @@ class CompilerDriver:
         )
 
     def compile(self, source_file: str, source_code: str, output_path: str, args: argparse.Namespace) -> int:
-        # Placeholder for full compilation pipeline:
-        # Lexing -> Parsing -> Sema -> IR -> Lowering -> Backend
-        # We will connect each stage as we implement them!
+        lexer = Lexer(source_code=source_code, file_path=source_file, emitter=self.emitter)
+        tokens = lexer.tokenize()
+
+        if self.emitter.has_errors():
+            return 1
+
         if args.dump_tokens:
+            for tok in tokens:
+                loc = f"{tok.span.start.line}:{tok.span.start.column}"
+                if tok.type == TokenType.INT_LITERAL:
+                    print(f"{loc:<10} {tok.type.name:<15} '{tok.lexeme}' (value={tok.value})")
+                elif tok.type == TokenType.EOF:
+                    print(f"{loc:<10} {tok.type.name}")
+                else:
+                    print(f"{loc:<10} {tok.type.name:<15} '{tok.lexeme}'")
             return 0
+
         if args.dump_ast:
             return 0
         if args.dump_symbols:
