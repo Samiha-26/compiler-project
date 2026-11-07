@@ -3,7 +3,10 @@
 from __future__ import annotations
 import argparse
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from typing import List, Optional
 
 from cminor import __version__
@@ -16,6 +19,7 @@ from cminor.lexer import Lexer, TokenType
 from cminor.parser import Parser, ASTDumper
 from cminor.sema import SemanticAnalyzer
 from cminor.ir import IRGenerator
+from cminor.codegen import LLVMEmitter, QBEEmitter
 
 
 CAPABILITIES_TEXT = f"""C Minor Compiler (cminorcc) Capabilities Report
@@ -221,9 +225,129 @@ class CompilerDriver:
             print(ir_program.format())
             return 0
 
+        backend_name = args.backend
+        if backend_name == "llvm":
+            llvm_emitter = LLVMEmitter()
+            backend_ir_text = llvm_emitter.emit(ir_program)
+            il_ext = ".ll"
+        elif backend_name == "qbe":
+            qbe_emitter = QBEEmitter()
+            backend_ir_text = qbe_emitter.emit(ir_program)
+            il_ext = ".ssa"
+        else:
+            self.emitter.report(
+                code=DiagnosticCode.COMMAND_ERROR,
+                message=f"Unsupported backend '{backend_name}'. Supported backends: llvm, qbe.",
+            )
+            return 2
+
         if args.emit_backend_ir:
+            if args.output:
+                try:
+                    with open(args.output, "w", encoding="utf-8") as f:
+                        f.write(backend_ir_text)
+                    return 0
+                except OSError as e:
+                    self.emitter.report(
+                        code=DiagnosticCode.IO_ERROR,
+                        message=f"Failed to write backend IR to '{args.output}': {e.strerror}",
+                    )
+                    return 1
+            else:
+                sys.stdout.write(backend_ir_text)
+                return 0
+
+        return self._invoke_backend(
+            backend_name=backend_name,
+            backend_ir_text=backend_ir_text,
+            il_ext=il_ext,
+            output_path=output_path,
+        )
+
+    def _invoke_backend(
+        self,
+        backend_name: str,
+        backend_ir_text: str,
+        il_ext: str,
+        output_path: str,
+    ) -> int:
+        tool_name = "llc" if backend_name == "llvm" else "qbe"
+        tool_path = shutil.which(tool_name)
+        if not tool_path:
+            self.emitter.report(
+                code=DiagnosticCode.BACKEND_ERROR,
+                message=f"Backend executable '{tool_name}' not found in system PATH.",
+            )
+            return 1
+
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if not os.path.exists(out_dir):
+            try:
+                os.makedirs(out_dir, exist_ok=True)
+            except OSError as e:
+                self.emitter.report(
+                    code=DiagnosticCode.IO_ERROR,
+                    message=f"Cannot create output directory '{out_dir}': {e.strerror}",
+                )
+                return 1
+
+        temp_ir = None
+        temp_s = None
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=il_ext, delete=False, encoding="utf-8") as f:
+                f.write(backend_ir_text)
+                temp_ir = f.name
+
+            temp_s = tempfile.mktemp(suffix=".s", dir=out_dir)
+
+            if backend_name == "llvm":
+                cmd = [
+                    tool_path,
+                    "-O0",
+                    "-mtriple=x86_64-pc-linux-gnu",
+                    "-filetype=asm",
+                    temp_ir,
+                    "-o",
+                    temp_s,
+                ]
+            else:
+                cmd = [
+                    tool_path,
+                    "-t",
+                    "amd64_sysv",
+                    "-o",
+                    temp_s,
+                    temp_ir,
+                ]
+
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                self.emitter.report(
+                    code=DiagnosticCode.BACKEND_ERROR,
+                    message=f"Backend '{tool_name}' failed with exit code {proc.returncode}: {proc.stderr.strip()}",
+                )
+                return 1
+
+            os.replace(temp_s, output_path)
             return 0
-        return 0
+
+        except OSError as e:
+            self.emitter.report(
+                code=DiagnosticCode.IO_ERROR,
+                message=f"File I/O error during backend code emission: {e.strerror}",
+            )
+            return 1
+        finally:
+            if temp_ir and os.path.exists(temp_ir):
+                try:
+                    os.remove(temp_ir)
+                except OSError:
+                    pass
+            if temp_s and os.path.exists(temp_s):
+                try:
+                    os.remove(temp_s)
+                except OSError:
+                    pass
 
 
 def main(argv: Optional[List[str]] = None) -> int:
