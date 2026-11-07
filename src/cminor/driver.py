@@ -13,6 +13,7 @@ from cminor.diagnostics import (
     CompilerException,
 )
 from cminor.lexer import Lexer, TokenType
+from cminor.parser import Parser, ASTDumper
 
 
 CAPABILITIES_TEXT = f"""C Minor Compiler (cminorcc) Capabilities Report
@@ -187,7 +188,15 @@ class CompilerDriver:
                     print(f"{loc:<10} {tok.type.name:<15} '{tok.lexeme}'")
             return 0
 
+        parser = Parser(tokens=tokens, file_path=source_file, emitter=self.emitter)
+        ast = parser.parse_program()
+
+        if self.emitter.has_errors():
+            return 1
+
         if args.dump_ast:
+            dumper = ASTDumper()
+            print(dumper.dump(ast))
             return 0
         if args.dump_symbols:
             return 0
